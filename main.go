@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 	"sync"
@@ -21,17 +25,21 @@ func (flags *options) parseFileOrList() []string {
 		return strings.Split(flags.machines, ",")
 	}
 
+	if flags.group == "" {
+		log.Fatal("Group or Machine list is required")
+	}
+
 	configPath := path.Join(flags.groupPath, flags.group)
 	contents, err := os.ReadFile(configPath)
 	if err != nil {
-		panic("Config file now found: " + configPath)
+		log.Fatal("Node Group file not found: " + configPath)
 	}
 
 	var nodes []string
 	rawnodes := strings.Split(string(contents), "\n")
 
 	for _, node := range rawnodes {
-		if node != "" {
+		if node != "" && !strings.HasPrefix(node, "#") {
 			nodes = append(nodes, node)
 		}
 	}
@@ -39,38 +47,72 @@ func (flags *options) parseFileOrList() []string {
 	return nodes
 }
 
+type gopher func(string, <-chan string, []string)
 type gopherPool struct {
 	workerCount int
-	jobs        chan string
+	nodes       chan string
+	worker      gopher
 }
 
-func newGopherPool(workCount int) *gopherPool {
-	pool := gopherPool{workerCount: workCount, jobs: make(chan string, workCount*2)}
+func newGopherPool(workCount int, worker gopher) *gopherPool {
+	pool := gopherPool{workerCount: workCount, nodes: make(chan string, workCount*2), worker: worker}
 	return &pool
 }
 
 func (gp *gopherPool) begin(nodes []string, cmd []string) {
 	var wg sync.WaitGroup
+
 	for worker := 0; worker < gp.workerCount; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			gopher(gp.jobs)
+			gp.worker("ssh", gp.nodes, cmd)
 		}()
 	}
 
 	for _, work := range nodes {
-		gp.jobs <- work
+		gp.nodes <- work
 	}
 
-	close(gp.jobs)
+	close(gp.nodes)
 
 	wg.Wait()
 }
 
-func gopher(jobs <-chan string) {
-	for job := range jobs {
-		fmt.Println(job)
+func processor(remoteCmd string, nodes <-chan string, cmd []string) {
+	for node := range nodes {
+		combineNode := []string{}
+		combineNode = append(combineNode, node)
+		combineNode = append(combineNode, cmd...)
+
+		remoteExec := exec.Command(remoteCmd, combineNode...)
+
+		remoteStdout, err := remoteExec.StdoutPipe()
+		if err != nil {
+			log.Fatal("Failed to get stdout reader:", err)
+		}
+
+		remoteStderr, err := remoteExec.StderrPipe()
+		if err != nil {
+			log.Fatal("Failed to get stderr reader:", err)
+		}
+
+		outputReader := io.MultiReader(remoteStdout, remoteStderr)
+		outputScanner := bufio.NewScanner(outputReader)
+
+		if err := remoteExec.Start(); err != nil {
+			log.Fatal("Failed to start remote execution:", err)
+		}
+
+		for outputScanner.Scan() {
+			fmt.Printf("%s: %s\n", node, outputScanner.Text())
+		}
+
+		if err := outputScanner.Err(); err != nil {
+			log.Fatal("Failed to read output from remote execution:", err)
+		}
+
+		remoteExec.Wait()
 	}
 }
 
@@ -90,7 +132,7 @@ func main() {
 	flag.Parse()
 
 	nodes := cliFlags.parseFileOrList()
-	pool := newGopherPool(cliFlags.workers)
+	pool := newGopherPool(cliFlags.workers, processor)
 
 	pool.begin(nodes, flag.Args())
 
