@@ -13,14 +13,26 @@ import (
 	"sync"
 )
 
-type options struct {
+type Options struct {
+	confType  string
 	group     string
 	machines  string
 	groupPath string
 	workers   int
 }
 
-func (flags *options) parseFileOrList() []string {
+func (flags *Options) getNodes() []string {
+	var nodes []string
+
+	switch flags.confType {
+	case "local":
+		nodes = flags.parseFileOrList()
+	}
+
+	return nodes
+}
+
+func (flags *Options) parseFileOrList() []string {
 	if flags.machines != "" {
 		return strings.Split(flags.machines, ",")
 	}
@@ -47,26 +59,29 @@ func (flags *options) parseFileOrList() []string {
 	return nodes
 }
 
-type gopher func(string, <-chan string, []string)
-type gopherPool struct {
-	workerCount int
-	nodes       chan string
-	worker      gopher
+type Gopher interface {
+	exec(nodes <-chan string, cmd []string)
 }
 
-func newGopherPool(workCount int, worker gopher) *gopherPool {
-	pool := gopherPool{workerCount: workCount, nodes: make(chan string, workCount*2), worker: worker}
+type GopherPool struct {
+	workerCount int
+	nodes       chan string
+	worker      Gopher
+}
+
+func newGopherPool(workCount int, worker Gopher) *GopherPool {
+	pool := GopherPool{workerCount: workCount, nodes: make(chan string, workCount*2), worker: worker}
 	return &pool
 }
 
-func (gp *gopherPool) begin(nodes []string, cmd []string) {
+func (gp *GopherPool) begin(nodes []string, cmd []string) {
 	var wg sync.WaitGroup
 
 	for worker := 0; worker < gp.workerCount; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			gp.worker("ssh", gp.nodes, cmd)
+			gp.worker.exec(gp.nodes, cmd)
 		}()
 	}
 
@@ -79,13 +94,21 @@ func (gp *gopherPool) begin(nodes []string, cmd []string) {
 	wg.Wait()
 }
 
-func processor(remoteCmd string, nodes <-chan string, cmd []string) {
+type GenericGopher struct {
+	mainCmd string
+}
+
+func newSSHWorker() *GenericGopher {
+	return &GenericGopher{mainCmd: "ssh"}
+}
+
+func (worker *GenericGopher) exec(nodes <-chan string, cmd []string) {
 	for node := range nodes {
 		combineNode := []string{}
 		combineNode = append(combineNode, node)
 		combineNode = append(combineNode, cmd...)
 
-		remoteExec := exec.Command(remoteCmd, combineNode...)
+		remoteExec := exec.Command(worker.mainCmd, combineNode...)
 
 		remoteStdout, err := remoteExec.StdoutPipe()
 		if err != nil {
@@ -116,23 +139,25 @@ func processor(remoteCmd string, nodes <-chan string, cmd []string) {
 	}
 }
 
-var cliFlags options
+var gsh Options
 
 func init() {
 
 	homeDir, _ := os.UserHomeDir()
 
-	flag.StringVar(&cliFlags.groupPath, "configpath", path.Join(homeDir, ".gsh/groups"), "Set the path to find groups")
-	flag.StringVar(&cliFlags.group, "g", "", "The group of nodes to run commands against")
-	flag.StringVar(&cliFlags.machines, "m", "", "Comma delimited list of nodes to run commands against")
-	flag.IntVar(&cliFlags.workers, "f", 1, "The amount of nodes to process the commands")
+	flag.StringVar(&gsh.confType, "conftype", "local", "Use local values to find nodes and execute")
+	flag.StringVar(&gsh.groupPath, "configpath", path.Join(homeDir, ".gsh/groups"), "Set the path to find groups")
+	flag.StringVar(&gsh.group, "g", "", "The group of nodes to run commands against")
+	flag.StringVar(&gsh.machines, "m", "", "Comma delimited list of nodes to run commands against")
+	flag.IntVar(&gsh.workers, "f", 1, "The amount of nodes to process the commands")
 }
 
 func main() {
 	flag.Parse()
 
-	nodes := cliFlags.parseFileOrList()
-	pool := newGopherPool(cliFlags.workers, processor)
+	nodes := gsh.getNodes()
+	sshGopher := newSSHWorker()
+	pool := newGopherPool(gsh.workers, sshGopher)
 
 	pool.begin(nodes, flag.Args())
 
