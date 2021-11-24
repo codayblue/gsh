@@ -51,7 +51,7 @@ func (flags *Options) parseFileOrList() []string {
 	rawnodes := strings.Split(string(contents), "\n")
 
 	for _, node := range rawnodes {
-		if node != "" && !strings.HasPrefix(node, "#") {
+		if strings.TrimSpace(node) != "" && !strings.HasPrefix(node, "#") {
 			nodes = append(nodes, node)
 		}
 	}

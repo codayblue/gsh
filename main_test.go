@@ -24,7 +24,7 @@ func TestLocalMachineListLoading(t *testing.T) {
 func TestLocalMachineGroupLoading(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := path.Join(tempDir, "sampleGroup")
-	err := os.WriteFile(testFile, []byte("node1\nnode2\nnode3\n#node4\n"), 0644)
+	err := os.WriteFile(testFile, []byte("   \nnode1\nnode2\nnode3\n#node4\n"), 0644)
 
 	if err != nil {
 		t.Fatal("Failed to create test file")
