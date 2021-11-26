@@ -3,8 +3,11 @@ package main
 import (
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/consul/api"
 )
 
 func TestLocalMachineListLoading(t *testing.T) {
@@ -50,6 +53,38 @@ func TestLocalMachineGroupLoading(t *testing.T) {
 			t.Fatal("Found blank node")
 		}
 	}
+}
+
+func TestConsulLoading(t *testing.T) {
+
+	consulClient, err := api.NewClient(api.DefaultConfig())
+
+	if err != nil {
+		t.Fatal("Could not create consul client")
+	}
+
+	for i := 0; i < 3; i++ {
+		_, err := consulClient.Catalog().Register(
+			&api.CatalogRegistration{
+				Node:    "node" + strconv.Itoa(i+1),
+				Address: "10.0.0." + strconv.Itoa((i+1)*10),
+				Service: &api.AgentService{
+					ID:      "redis",
+					Service: "redis",
+				},
+			},
+			&api.WriteOptions{},
+		)
+
+		if err != nil {
+			t.Fatal("Could not fill consul with test data")
+		}
+	}
+
+	gsh := &Options{confType: "consul"}
+	nodes := gsh.getNodes()
+
+	t.Fatal(nodes)
 }
 
 type TestWorker struct {

@@ -11,6 +11,8 @@ import (
 	"path"
 	"strings"
 	"sync"
+
+	"github.com/hashicorp/consul/api"
 )
 
 type Options struct {
@@ -27,6 +29,14 @@ func (flags *Options) getNodes() []string {
 	switch flags.confType {
 	case "local":
 		nodes = flags.parseFileOrList()
+	case "consul":
+		client, err := api.NewClient(api.DefaultConfig())
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		nodes = flags.getConsulNodes(client)
 	}
 
 	return nodes
@@ -54,6 +64,23 @@ func (flags *Options) parseFileOrList() []string {
 		if strings.TrimSpace(node) != "" && !strings.HasPrefix(node, "#") {
 			nodes = append(nodes, node)
 		}
+	}
+
+	return nodes
+}
+
+func (flags *Options) getConsulNodes(consulClient *api.Client) []string {
+	nodes := []string{}
+	catalog := consulClient.Catalog()
+
+	catalogService, _, err := catalog.Service("redis", "", &api.QueryOptions{})
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, servicenode := range catalogService {
+		nodes = append(nodes, servicenode.Address)
 	}
 
 	return nodes
