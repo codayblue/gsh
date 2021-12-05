@@ -20,7 +20,7 @@ This method of finding nodes operates by either passing a comma delimited string
 ```text
 node1
 node2
-pi@node3
+node3
 #node4
 ```
 
