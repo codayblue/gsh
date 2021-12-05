@@ -26,9 +26,23 @@ pi@node3
 
 For that group it will use the default logged in user for nodes 1-2 and then switch to pi user for node 3. Node 4 is commented out and wont be found. Any blank space will be ignored. 
 
+### Consul Discovery
+
+This method will use consul to find nodes for a given service or just listing all the nodes. Filters can be passed through to the api that will limit the nodes pulled. By default it will connect to `http://127.0.0.1:8500` but that can be changed to a new connection point using consul environment variables or any other way the consul cli client can be configured (except through cli params, those are unsupported). Links below for relevant documentation.
+
+To use consul make sure to have GSH v0.2.x installed. Binaries can be downloaded from github releases page.
+
+Set `-conftype` to consul then the consul flags will be used to find nodes. By default it will look for a service and you must pass `-consulservice` via the cli to set the service you are interested in. To pass filters to consul use `-consulfilter` and filter will be passed directly to consul.
+
+If you want to just grab all nodes and filter thoughs the filter flag is the same but set `-consulservice` to `nodes`. That will pull a list of nodes and apply the filters. Leave filter blank if you want to pull all nodes from the api.
+
+Relevant documentation:
+(Consul ENV)[https://www.consul.io/commands#environment-variables]
+(Consul Filtering)[https://www.consul.io/api-docs/features/filtering]
+
 ## Plans of what features come next
 
-Right now local discovery is the only implementation but there is plans to support Consul and Kubectl to find nodes and pods. Also eventually I would like to find a way to allow people to compile the binary with their own workers and ways of discovering node types to be able to run commands against them.
+Right now local discovery and consul are the current supported implementations but there is plans to support Kubectl as well to find pods and to execute commands within the pod context. Also eventually I would like to find a way to allow people to compile the binary with their own workers and ways of discovering node types to be able to run commands against them. This might end up using the golang plugin system and be dynamically found during execution.
 
 ## Contributing
 
