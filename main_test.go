@@ -11,15 +11,15 @@ import (
 )
 
 func TestLocalMachineListLoading(t *testing.T) {
-	gsh := &Options{confType: "local", machines: "node1,node2,node3"}
+	flags := Options{confType: "local", machines: "node1,node2,node3"}
 
-	nodes := gsh.getNodes()
+	nodes := getNodes(flags)
 
 	if len(nodes) < 3 {
 		t.Fatalf("All nodes were not found: %v", nodes)
 	}
 
-	if nodes[0] != "node1" {
+	if nodes[0].address != "node1" {
 		t.Fatalf("First entry was not as expected: %s", nodes[0])
 	}
 }
@@ -33,29 +33,29 @@ func TestLocalMachineGroupLoading(t *testing.T) {
 		t.Fatal("Failed to create test file")
 	}
 
-	gsh := &Options{confType: "local", group: "sampleGroup", groupPath: tempDir}
-	nodes := gsh.getNodes()
+	flags := Options{confType: "local", group: "sampleGroup", groupPath: tempDir}
+	nodes := getNodes(flags)
 
 	if len(nodes) < 3 {
 		t.Fatalf("All nodes were not found: %v", nodes)
 	}
 
-	if nodes[0] != "node1" {
+	if nodes[0].address != "node1" {
 		t.Fatalf("First entry was not as expected: %s", nodes[0])
 	}
 
 	for _, node := range nodes {
-		if node == "node4" {
+		if node.address == "node4" {
 			t.Fatalf("Found a commented out node: %s", node)
 		}
 
-		if node == "" {
+		if node.address == "" {
 			t.Fatal("Found blank node")
 		}
 	}
 }
 
-func TestConsulLoading(t *testing.T) {
+func TestConsulServiceLoading(t *testing.T) {
 
 	consulClient, err := api.NewClient(api.DefaultConfig())
 
@@ -64,13 +64,22 @@ func TestConsulLoading(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
+		nodeName := "node" + strconv.Itoa(i+1)
+		nodeAddress := "10.0.0." + strconv.Itoa((i+1)*10)
+		serviceTags := []string{}
+
+		if i%2 == 0 {
+			serviceTags = append(serviceTags, "odd")
+		}
+
 		_, err := consulClient.Catalog().Register(
 			&api.CatalogRegistration{
-				Node:    "node" + strconv.Itoa(i+1),
-				Address: "10.0.0." + strconv.Itoa((i+1)*10),
+				Node:    nodeName,
+				Address: nodeAddress,
 				Service: &api.AgentService{
 					ID:      "redis",
 					Service: "redis",
+					Tags:    serviceTags,
 				},
 			},
 			&api.WriteOptions{},
@@ -81,19 +90,54 @@ func TestConsulLoading(t *testing.T) {
 		}
 	}
 
-	gsh := &Options{confType: "consul"}
-	nodes := gsh.getNodes()
+	serviceflags := Options{
+		confType:      "consul",
+		consulType:    "service",
+		consulFilter:  "odd in ServiceTags",
+		consulService: "redis",
+	}
+	serviceNodes := getNodes(serviceflags)
 
-	t.Fatal(nodes)
+	if len(serviceNodes) == 0 {
+		t.Fatalf("No nodes were found from consul")
+	}
+
+	if len(serviceNodes) > 2 {
+		t.Fatalf("Consul filter did not limit nodes: found %d expected 2", len(serviceNodes))
+	}
+
+	if serviceNodes[0].label != "node1" || serviceNodes[0].address != "10.0.0.10" {
+		t.Fatalf("First node was not as expected: %v", serviceNodes[0])
+	}
+
+	nodesFlags := Options{
+		confType:      "consul",
+		consulType:    "nodes",
+		consulFilter:  "Node contains node",
+		consulService: "",
+	}
+	consulNodes := getNodes(nodesFlags)
+
+	if len(consulNodes) == 0 {
+		t.Fatalf("No nodes were found from consul")
+	}
+
+	if len(serviceNodes) > 3 {
+		t.Fatalf("Consul filter did not limit nodes: found %d expected 3", len(serviceNodes))
+	}
+
+	if consulNodes[0].label != "node1" || consulNodes[0].address != "10.0.0.10" {
+		t.Fatalf("First node was not as expected: %v", consulNodes[0])
+	}
 }
 
 type TestWorker struct {
 	t *testing.T
 }
 
-func (testWorker *TestWorker) exec(nodes <-chan string, cmd []string) {
+func (testWorker *TestWorker) exec(nodes <-chan Node, cmd []string) {
 	for node := range nodes {
-		if !strings.HasPrefix(node, "node") {
+		if !strings.HasPrefix(node.address, "node") {
 			testWorker.t.Fatalf("node is missing node in the front: %s", node)
 		}
 
@@ -106,10 +150,10 @@ func (testWorker *TestWorker) exec(nodes <-chan string, cmd []string) {
 func TestGopherPool(t *testing.T) {
 	gopherPool := newGopherPool(1, &TestWorker{t: t})
 
-	nodes := []string{
-		"node1",
-		"node2",
-		"node3",
+	nodes := []Node{
+		{label: "node1", address: "node1"},
+		{label: "node2", address: "node2"},
+		{label: "node3", address: "node3"},
 	}
 	gopherPool.begin(nodes, []string{"testCmd"})
 }
@@ -118,10 +162,10 @@ func TestGenericWorker(t *testing.T) {
 	echoWorker := &GenericGopher{mainCmd: "echo"}
 	gopherPool := newGopherPool(1, echoWorker)
 
-	nodes := []string{
-		"node1",
-		"node2",
-		"node3",
+	nodes := []Node{
+		{label: "node1", address: "node1"},
+		{label: "node2", address: "node2"},
+		{label: "node3", address: "node3"},
 	}
 	gopherPool.begin(nodes, []string{"testCmd"})
 }
