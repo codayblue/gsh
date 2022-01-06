@@ -1,5 +1,3 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
 before:
   hooks:
     # You may remove this if you don't use go modules.
@@ -15,6 +13,9 @@ builds:
       - amd64
       - arm
       - arm64
+    ldflags:
+      - -X main.version={{ .Env.GITHUB_REF_NAME }}
+      - -X main.commit={{ .Env.GITHUB_SHA }}
 archives:
   - replacements:
       darwin: Darwin
