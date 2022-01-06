@@ -15,6 +15,10 @@ import (
 	"github.com/hashicorp/consul/api"
 )
 
+type Gopher interface {
+	exec(nodes <-chan Node, cmd []string)
+}
+
 type Options struct {
 	confType  string
 	group     string
@@ -28,14 +32,28 @@ type Options struct {
 	consulService string
 }
 
-type Gopher interface {
-	exec(nodes <-chan Node, cmd []string)
-}
-
 type GopherPool struct {
 	workerCount int
 	nodes       chan Node
 	worker      Gopher
+}
+
+type GenericGopher struct {
+	mainCmd string
+}
+
+type Node struct {
+	label   string
+	address string
+}
+
+var config Options
+var commit string = ""
+var version string = "development"
+
+func printVersion() {
+	fmt.Printf("Version: %s\n", version)
+	fmt.Printf("Git SHA: %s\n", commit)
 }
 
 func newGopherPool(workCount int, worker Gopher) *GopherPool {
@@ -61,10 +79,6 @@ func (gp *GopherPool) begin(nodes []Node, cmd []string) {
 	close(gp.nodes)
 
 	wg.Wait()
-}
-
-type GenericGopher struct {
-	mainCmd string
 }
 
 func newSSHWorker() *GenericGopher {
@@ -106,11 +120,6 @@ func (worker *GenericGopher) exec(nodes <-chan Node, cmd []string) {
 
 		remoteExec.Wait()
 	}
-}
-
-type Node struct {
-	label   string
-	address string
 }
 
 func getNodes(flags Options) []Node {
@@ -215,8 +224,6 @@ func getConsulNodes(consulClient *api.Client, flags Options) []Node {
 	return nodes
 }
 
-var config Options
-
 func init() {
 
 	homeDir, _ := os.UserHomeDir()
@@ -233,6 +240,11 @@ func init() {
 
 func main() {
 	flag.Parse()
+
+	if os.Args[1] == "version" {
+		printVersion()
+		os.Exit(0)
+	}
 
 	nodes := getNodes(config)
 	sshGopher := newSSHWorker()
