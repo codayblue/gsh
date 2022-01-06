@@ -13,6 +13,12 @@ Flags for all implementations:
 `--` will cut off the flags and pass the rest to the workers. This is optional but might be needed when passing certain commands that contains flags of its own.
 `-h` will print to the screen all the options that are available.
 
+If you wanna check the version you can do so by running
+
+```bash
+gsh version
+```
+
 ### Local Discovery (Currently default)
 
 This method of finding nodes operates by either passing a comma delimited string of node adresses and users or creating a file like the example below at `~/.gsh/groups/<name of group>`. You pick the group with the `-g` flag. You can change the config path using `-configpath`. 
