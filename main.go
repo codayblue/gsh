@@ -20,6 +20,7 @@ type Gopher interface {
 }
 
 type Options struct {
+	version   bool
 	confType  string
 	group     string
 	machines  string
@@ -36,24 +37,6 @@ type GopherPool struct {
 	workerCount int
 	nodes       chan Node
 	worker      Gopher
-}
-
-type GenericGopher struct {
-	mainCmd string
-}
-
-type Node struct {
-	label   string
-	address string
-}
-
-var config Options
-var commit string = ""
-var version string = "development"
-
-func printVersion() {
-	fmt.Printf("Version: %s\n", version)
-	fmt.Printf("Git SHA: %s\n", commit)
 }
 
 func newGopherPool(workCount int, worker Gopher) *GopherPool {
@@ -79,6 +62,10 @@ func (gp *GopherPool) begin(nodes []Node, cmd []string) {
 	close(gp.nodes)
 
 	wg.Wait()
+}
+
+type GenericGopher struct {
+	mainCmd string
 }
 
 func newSSHWorker() *GenericGopher {
@@ -120,6 +107,20 @@ func (worker *GenericGopher) exec(nodes <-chan Node, cmd []string) {
 
 		remoteExec.Wait()
 	}
+}
+
+type Node struct {
+	label   string
+	address string
+}
+
+var config Options
+var commit string = ""
+var version string = "development"
+
+func printVersion() {
+	fmt.Printf("Version: %s\n", version)
+	fmt.Printf("Git SHA: %s\n", commit)
 }
 
 func getNodes(flags Options) []Node {
@@ -227,21 +228,23 @@ func getConsulNodes(consulClient *api.Client, flags Options) []Node {
 func init() {
 
 	homeDir, _ := os.UserHomeDir()
+	configDir := path.Join(homeDir, ".gsh")
 
 	flag.StringVar(&config.confType, "conftype", "local", "Use local values to find nodes and execute")
-	flag.StringVar(&config.groupPath, "configpath", path.Join(homeDir, ".gsh/groups"), "Set the path to find groups")
+	flag.StringVar(&config.groupPath, "configpath", path.Join(configDir, "groups"), "Set the path to find groups")
 	flag.StringVar(&config.consulType, "consultype", "service", "Lookup nodes via service or just list nodes")
 	flag.StringVar(&config.consulFilter, "consulfilter", "", "The filters that will be passed to consuls api")
 	flag.StringVar(&config.consulService, "consulservice", "", "The service that will be looked if type set to service")
 	flag.StringVar(&config.group, "g", "", "The group of nodes to run commands against")
 	flag.StringVar(&config.machines, "m", "", "Comma delimited list of nodes to run commands against")
-	flag.IntVar(&config.workers, "f", 1, "The amount of nodes to process the commands")
+	flag.IntVar(&config.workers, "f", 1, "The amount of workers to process the commands on a number of nodes")
+	flag.BoolVar(&config.version, "version", false, "Get the version of GSH")
 }
 
 func main() {
 	flag.Parse()
 
-	if os.Args[1] == "version" {
+	if config.version {
 		printVersion()
 		os.Exit(0)
 	}

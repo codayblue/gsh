@@ -16,7 +16,7 @@ Flags for all implementations:
 If you wanna check the version you can do so by running
 
 ```bash
-gsh version
+gsh -version
 ```
 
 ### Local Discovery (Currently default)
