@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -12,18 +11,16 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hashicorp/consul/api"
+	"github.com/spf13/cobra"
 )
 
 type Gopher interface {
-	exec(nodes <-chan Node, cmd []string)
+	exec(nodes <-chan *Node, cmd []string)
 }
 
 type Options struct {
-	version   bool
 	confType  string
-	group     string
-	machines  string
+	machines  bool
 	groupPath string
 	workers   int
 
@@ -35,16 +32,16 @@ type Options struct {
 
 type GopherPool struct {
 	workerCount int
-	nodes       chan Node
+	nodes       chan *Node
 	worker      Gopher
 }
 
 func newGopherPool(workCount int, worker Gopher) *GopherPool {
-	pool := GopherPool{workerCount: workCount, nodes: make(chan Node, workCount*2), worker: worker}
+	pool := GopherPool{workerCount: workCount, nodes: make(chan *Node, workCount*2), worker: worker}
 	return &pool
 }
 
-func (gp *GopherPool) begin(nodes []Node, cmd []string) {
+func (gp *GopherPool) begin(nodes []*Node, cmd []string) {
 	var wg sync.WaitGroup
 
 	for worker := 0; worker < gp.workerCount; worker++ {
@@ -72,7 +69,7 @@ func newSSHWorker() *GenericGopher {
 	return &GenericGopher{mainCmd: "ssh"}
 }
 
-func (worker *GenericGopher) exec(nodes <-chan Node, cmd []string) {
+func (worker *GenericGopher) exec(nodes <-chan *Node, cmd []string) {
 	for node := range nodes {
 		combineNode := []string{}
 		combineNode = append(combineNode, node.address)
@@ -123,46 +120,18 @@ func printVersion() {
 	fmt.Printf("Git SHA: %s\n", commit)
 }
 
-func getNodes(flags Options) []Node {
-	var nodes []Node
+func parseFileOrList(configDir string, enableMachines bool, group string) []*Node {
+	nodes := []*Node{}
 
-	switch flags.confType {
-	case "local":
-		nodes = parseFileOrList(flags)
-	case "consul":
-		client, err := api.NewClient(api.DefaultConfig())
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if flags.consulType == "service" {
-			nodes = getConsulServiceNodes(client, flags)
-		} else {
-			nodes = getConsulNodes(client, flags)
-		}
-
-	}
-
-	return nodes
-}
-
-func parseFileOrList(flags Options) []Node {
-	nodes := []Node{}
-
-	if flags.machines != "" {
-		for _, foundNode := range strings.Split(flags.machines, ",") {
-			nodes = append(nodes, Node{label: foundNode, address: foundNode})
+	if enableMachines {
+		for _, foundNode := range strings.Split(group, ",") {
+			nodes = append(nodes, &Node{label: foundNode, address: foundNode})
 		}
 
 		return nodes
 	}
 
-	if flags.group == "" {
-		log.Fatal("Group or Machine list is required")
-	}
-
-	configPath := path.Join(flags.groupPath, flags.group)
+	configPath := path.Join(configDir, group)
 	contents, err := os.ReadFile(configPath)
 	if err != nil {
 		log.Fatal("Node Group file not found: " + configPath)
@@ -174,86 +143,100 @@ func parseFileOrList(flags Options) []Node {
 		trimmedNode := strings.TrimSpace(node)
 
 		if strings.TrimSpace(trimmedNode) != "" && !strings.HasPrefix(trimmedNode, "#") {
-			nodes = append(nodes, Node{label: trimmedNode, address: trimmedNode})
+			nodes = append(nodes, &Node{label: trimmedNode, address: trimmedNode})
 		}
 	}
 
 	return nodes
 }
 
-func getConsulServiceNodes(consulClient *api.Client, flags Options) []Node {
-	nodes := []Node{}
-	catalog := consulClient.Catalog()
+// func getConsulServiceNodes(consulClient *api.Client, flags Options) []Node {
+// 	nodes := []Node{}
+// 	catalog := consulClient.Catalog()
 
-	catalogService, _, err := catalog.Service(
-		flags.consulService,
-		"",
-		&api.QueryOptions{
-			Filter: flags.consulFilter,
-		},
-	)
+// 	catalogService, _, err := catalog.Service(
+// 		flags.consulService,
+// 		"",
+// 		&api.QueryOptions{
+// 			Filter: flags.consulFilter,
+// 		},
+// 	)
 
-	if err != nil {
-		log.Fatal(err)
-	}
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
 
-	for _, servicenode := range catalogService {
-		nodes = append(nodes, Node{label: servicenode.Node, address: servicenode.Address})
-	}
+// 	for _, servicenode := range catalogService {
+// 		nodes = append(nodes, Node{label: servicenode.Node, address: servicenode.Address})
+// 	}
 
-	return nodes
+// 	return nodes
+// }
+
+// func getConsulNodes(consulClient *api.Client, flags Options) []Node {
+// 	nodes := []Node{}
+// 	catalog := consulClient.Catalog()
+
+// 	catalogNodes, _, err := catalog.Nodes(
+// 		&api.QueryOptions{
+// 			Filter: flags.consulFilter,
+// 		},
+// 	)
+
+// 	if err != nil {
+// 		log.Fatal(err)
+// 	}
+
+// 	for _, catalognode := range catalogNodes {
+// 		nodes = append(nodes, Node{label: catalognode.Node, address: catalognode.Address})
+// 	}
+
+// 	return nodes
+// }
+
+func executeWorkers(workers int, nodes []*Node, cmd []string) {
+	sshGopher := newSSHWorker()
+	pool := newGopherPool(workers, sshGopher)
+
+	pool.begin(nodes, cmd)
+
+	fmt.Println("All Nodes Have Completed Task")
 }
 
-func getConsulNodes(consulClient *api.Client, flags Options) []Node {
-	nodes := []Node{}
-	catalog := consulClient.Catalog()
+func main() {
 
-	catalogNodes, _, err := catalog.Nodes(
-		&api.QueryOptions{
-			Filter: flags.consulFilter,
+	var rootCmd = &cobra.Command{
+		Use:   "gsh",
+		Short: "Gsh is a dsh like command with batteries built in",
+		Args:  cobra.MinimumNArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			nodes := parseFileOrList(config.groupPath, config.machines, args[0])
+
+			executeWorkers(config.workers, nodes, args[1:])
 		},
-	)
-
-	if err != nil {
-		log.Fatal(err)
 	}
 
-	for _, catalognode := range catalogNodes {
-		nodes = append(nodes, Node{label: catalognode.Node, address: catalognode.Address})
+	var versionCmd = &cobra.Command{
+		Use: "version",
+		Run: func(cmd *cobra.Command, args []string) {
+			printVersion()
+		},
 	}
-
-	return nodes
-}
-
-func init() {
 
 	homeDir, _ := os.UserHomeDir()
 	configDir := path.Join(homeDir, ".gsh")
 
-	flag.StringVar(&config.confType, "conftype", "local", "Use local values to find nodes and execute")
-	flag.StringVar(&config.groupPath, "configpath", path.Join(configDir, "groups"), "Set the path to find groups")
-	flag.StringVar(&config.consulType, "consultype", "service", "Lookup nodes via service or just list nodes")
-	flag.StringVar(&config.consulFilter, "consulfilter", "", "The filters that will be passed to consuls api")
-	flag.StringVar(&config.consulService, "consulservice", "", "The service that will be looked if type set to service")
-	flag.StringVar(&config.group, "g", "", "The group of nodes to run commands against")
-	flag.StringVar(&config.machines, "m", "", "Comma delimited list of nodes to run commands against")
-	flag.IntVar(&config.workers, "f", 1, "The amount of workers to process the commands on a number of nodes")
-	flag.BoolVar(&config.version, "version", false, "Get the version of GSH")
-}
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.Flags().StringVarP(&config.confType, "conftype", "c", "local", "Use local values to find nodes and execute")
+	rootCmd.Flags().StringVarP(&config.groupPath, "group-path", "p", path.Join(configDir, "groups"), "Set the path to find groups")
+	rootCmd.Flags().StringVar(&config.consulType, "consultype", "service", "Lookup nodes via service or just list nodes")
+	rootCmd.Flags().StringVar(&config.consulFilter, "consulfilter", "", "The filters that will be passed to consuls api")
+	rootCmd.Flags().StringVar(&config.consulService, "consulservice", "", "The service that will be looked if type set to service")
+	rootCmd.Flags().BoolVarP(&config.machines, "machine-list", "m", false, "Use a comma delimited list of nodes to run commands against instead of a group name")
+	rootCmd.Flags().IntVarP(&config.workers, "workers", "f", 1, "The amount of workers to process the commands on a number of nodes")
 
-func main() {
-	flag.Parse()
-
-	if config.version {
-		printVersion()
-		os.Exit(0)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
-
-	nodes := getNodes(config)
-	sshGopher := newSSHWorker()
-	pool := newGopherPool(config.workers, sshGopher)
-
-	pool.begin(nodes, flag.Args())
-
-	fmt.Println("All Nodes Have Completed Task")
 }
