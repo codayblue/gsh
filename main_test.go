@@ -3,8 +3,11 @@ package main
 import (
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/hashicorp/consul/api"
 )
 
 func TestLocalMachineListLoading(t *testing.T) {
@@ -49,81 +52,71 @@ func TestLocalMachineGroupLoading(t *testing.T) {
 	}
 }
 
-// func TestConsulServiceLoading(t *testing.T) {
+func TestConsulServiceLoading(t *testing.T) {
 
-// 	consulClient, err := api.NewClient(api.DefaultConfig())
+	apiClient, err := api.NewClient(api.DefaultConfig())
 
-// 	if err != nil {
-// 		t.Fatal("Could not create consul client")
-// 	}
+	if err != nil {
+		t.Fatal("Could not create consul client")
+	}
 
-// 	for i := 0; i < 3; i++ {
-// 		nodeName := "node" + strconv.Itoa(i+1)
-// 		nodeAddress := "10.0.0." + strconv.Itoa((i+1)*10)
-// 		serviceTags := []string{}
+	consul := &ConsulConnection{client: apiClient}
 
-// 		if i%2 == 0 {
-// 			serviceTags = append(serviceTags, "odd")
-// 		}
+	for i := 0; i < 3; i++ {
+		nodeName := "node" + strconv.Itoa(i+1)
+		nodeAddress := "10.0.0." + strconv.Itoa((i+1)*10)
+		serviceTags := []string{}
 
-// 		_, err := consulClient.Catalog().Register(
-// 			&api.CatalogRegistration{
-// 				Node:    nodeName,
-// 				Address: nodeAddress,
-// 				Service: &api.AgentService{
-// 					ID:      "redis",
-// 					Service: "redis",
-// 					Tags:    serviceTags,
-// 				},
-// 			},
-// 			&api.WriteOptions{},
-// 		)
+		if i%2 == 0 {
+			serviceTags = append(serviceTags, "odd")
+		}
 
-// 		if err != nil {
-// 			t.Fatal("Could not fill consul with test data")
-// 		}
-// 	}
+		_, err := consul.client.Catalog().Register(
+			&api.CatalogRegistration{
+				Node:    nodeName,
+				Address: nodeAddress,
+				Service: &api.AgentService{
+					ID:      "redis",
+					Service: "redis",
+					Tags:    serviceTags,
+				},
+			},
+			&api.WriteOptions{},
+		)
 
-// 	serviceflags := Options{
-// 		confType:      "consul",
-// 		consulType:    "service",
-// 		consulFilter:  "odd in ServiceTags",
-// 		consulService: "redis",
-// 	}
-// 	serviceNodes := getNodes(serviceflags)
+		if err != nil {
+			t.Fatal("Could not fill consul with test data")
+		}
+	}
 
-// 	if len(serviceNodes) == 0 {
-// 		t.Fatalf("No nodes were found from consul")
-// 	}
+	serviceNodes := consul.getConsulServiceNodes("redis", "odd in ServiceTags")
 
-// 	if len(serviceNodes) > 2 {
-// 		t.Fatalf("Consul filter did not limit nodes: found %d expected 2", len(serviceNodes))
-// 	}
+	if len(serviceNodes) == 0 {
+		t.Fatalf("No nodes were found from consul")
+	}
 
-// 	if serviceNodes[0].label != "node1" || serviceNodes[0].address != "10.0.0.10" {
-// 		t.Fatalf("First node was not as expected: %v", serviceNodes[0])
-// 	}
+	if len(serviceNodes) > 2 {
+		t.Fatalf("Consul filter did not limit nodes: found %d expected 2", len(serviceNodes))
+	}
 
-// 	nodesFlags := Options{
-// 		confType:      "consul",
-// 		consulType:    "nodes",
-// 		consulFilter:  "Node contains node",
-// 		consulService: "",
-// 	}
-// 	consulNodes := getNodes(nodesFlags)
+	if serviceNodes[0].label != "node1" || serviceNodes[0].address != "10.0.0.10" {
+		t.Fatalf("First node was not as expected: %v", serviceNodes[0])
+	}
 
-// 	if len(consulNodes) == 0 {
-// 		t.Fatalf("No nodes were found from consul")
-// 	}
+	consulNodes := consul.getConsulNodes("Node contains node")
 
-// 	if len(serviceNodes) > 3 {
-// 		t.Fatalf("Consul filter did not limit nodes: found %d expected 3", len(serviceNodes))
-// 	}
+	if len(consulNodes) == 0 {
+		t.Fatalf("No nodes were found from consul")
+	}
 
-// 	if consulNodes[0].label != "node1" || consulNodes[0].address != "10.0.0.10" {
-// 		t.Fatalf("First node was not as expected: %v", consulNodes[0])
-// 	}
-// }
+	if len(serviceNodes) > 3 {
+		t.Fatalf("Consul filter did not limit nodes: found %d expected 3", len(serviceNodes))
+	}
+
+	if consulNodes[0].label != "node1" || consulNodes[0].address != "10.0.0.10" {
+		t.Fatalf("First node was not as expected: %v", consulNodes[0])
+	}
+}
 
 type TestWorker struct {
 	t *testing.T

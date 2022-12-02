@@ -11,23 +11,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/hashicorp/consul/api"
 	"github.com/spf13/cobra"
 )
 
 type Gopher interface {
 	exec(nodes <-chan *Node, cmd []string)
-}
-
-type Options struct {
-	confType  string
-	machines  bool
-	groupPath string
-	workers   int
-
-	// Consul options
-	consulType    string
-	consulFilter  string
-	consulService string
 }
 
 type GopherPool struct {
@@ -111,13 +100,64 @@ type Node struct {
 	address string
 }
 
-var config Options
-var commit string = ""
-var version string = "development"
+type ConsulConnection struct {
+	client *api.Client
+}
 
-func printVersion() {
-	fmt.Printf("Version: %s\n", version)
-	fmt.Printf("Git SHA: %s\n", commit)
+func NewConsulConnection() (*ConsulConnection, error) {
+
+	consulClient, err := api.NewClient(api.DefaultConfig())
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &ConsulConnection{client: consulClient}, nil
+
+}
+
+func (consul *ConsulConnection) getConsulServiceNodes(service string, filter string) []*Node {
+	nodes := []*Node{}
+	catalog := consul.client.Catalog()
+
+	catalogService, _, err := catalog.Service(
+		service,
+		"",
+		&api.QueryOptions{
+			Filter: filter,
+		},
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, servicenode := range catalogService {
+		nodes = append(nodes, &Node{label: servicenode.Node, address: servicenode.Address})
+	}
+
+	return nodes
+}
+
+func (consul *ConsulConnection) getConsulNodes(filter string) []*Node {
+	nodes := []*Node{}
+	catalog := consul.client.Catalog()
+
+	catalogNodes, _, err := catalog.Nodes(
+		&api.QueryOptions{
+			Filter: filter,
+		},
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, catalognode := range catalogNodes {
+		nodes = append(nodes, &Node{label: catalognode.Node, address: catalognode.Address})
+	}
+
+	return nodes
 }
 
 func parseFileOrList(configDir string, enableMachines bool, group string) []*Node {
@@ -150,50 +190,6 @@ func parseFileOrList(configDir string, enableMachines bool, group string) []*Nod
 	return nodes
 }
 
-// func getConsulServiceNodes(consulClient *api.Client, flags Options) []Node {
-// 	nodes := []Node{}
-// 	catalog := consulClient.Catalog()
-
-// 	catalogService, _, err := catalog.Service(
-// 		flags.consulService,
-// 		"",
-// 		&api.QueryOptions{
-// 			Filter: flags.consulFilter,
-// 		},
-// 	)
-
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	for _, servicenode := range catalogService {
-// 		nodes = append(nodes, Node{label: servicenode.Node, address: servicenode.Address})
-// 	}
-
-// 	return nodes
-// }
-
-// func getConsulNodes(consulClient *api.Client, flags Options) []Node {
-// 	nodes := []Node{}
-// 	catalog := consulClient.Catalog()
-
-// 	catalogNodes, _, err := catalog.Nodes(
-// 		&api.QueryOptions{
-// 			Filter: flags.consulFilter,
-// 		},
-// 	)
-
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-
-// 	for _, catalognode := range catalogNodes {
-// 		nodes = append(nodes, Node{label: catalognode.Node, address: catalognode.Address})
-// 	}
-
-// 	return nodes
-// }
-
 func executeWorkers(workers int, nodes []*Node, cmd []string) {
 	sshGopher := newSSHWorker()
 	pool := newGopherPool(workers, sshGopher)
@@ -203,6 +199,12 @@ func executeWorkers(workers int, nodes []*Node, cmd []string) {
 	fmt.Println("All Nodes Have Completed Task")
 }
 
+var groupPath string
+var workers int
+var consulFilter string
+var commit string = ""
+var version string = "development"
+
 func main() {
 
 	var rootCmd = &cobra.Command{
@@ -210,30 +212,79 @@ func main() {
 		Short: "Gsh is a dsh like command with batteries built in",
 		Args:  cobra.MinimumNArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-			nodes := parseFileOrList(config.groupPath, config.machines, args[0])
+			nodes := parseFileOrList(groupPath, false, args[0])
 
-			executeWorkers(config.workers, nodes, args[1:])
+			executeWorkers(workers, nodes, args[1:])
+		},
+	}
+
+	var machineCmd = &cobra.Command{
+		Use:   "machine",
+		Short: "Pass comma list of machines",
+		Args:  cobra.MinimumNArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			nodes := parseFileOrList(groupPath, true, args[0])
+
+			executeWorkers(workers, nodes, args[1:])
 		},
 	}
 
 	var versionCmd = &cobra.Command{
-		Use: "version",
+		Use:   "version",
+		Short: "Shows the version of GSH",
 		Run: func(cmd *cobra.Command, args []string) {
-			printVersion()
+			fmt.Printf("Version: %s\n", version)
+			fmt.Printf("Git SHA: %s\n", commit)
 		},
 	}
+
+	var consulCmd = &cobra.Command{
+		Use:   "consul",
+		Short: "Use consul to find nodes",
+	}
+
+	var consulServiceCmd = &cobra.Command{
+		Use:   "service",
+		Short: "Look up nodes based on consul service definitions",
+		Run: func(cmd *cobra.Command, args []string) {
+			consulConnection, err := NewConsulConnection()
+
+			if err != nil {
+				log.Fatalf("Failed to connect to consul: %s", err.Error())
+			}
+
+			nodes := consulConnection.getConsulServiceNodes(args[0], consulFilter)
+
+			executeWorkers(workers, nodes, args[1:])
+		},
+	}
+
+	var consulNodeCmd = &cobra.Command{
+		Use:   "node",
+		Short: "Look up consul registered nodes",
+		Run: func(cmd *cobra.Command, args []string) {
+			consulConnection, err := NewConsulConnection()
+
+			if err != nil {
+				fmt.Printf("Failed to connect to consul: %s", err.Error())
+				os.Exit(1)
+			}
+
+			nodes := consulConnection.getConsulNodes(consulFilter)
+
+			executeWorkers(workers, nodes, args)
+		},
+	}
+
+	consulCmd.AddCommand(consulServiceCmd, consulNodeCmd)
+	rootCmd.AddCommand(versionCmd, machineCmd, consulCmd)
 
 	homeDir, _ := os.UserHomeDir()
 	configDir := path.Join(homeDir, ".gsh")
 
-	rootCmd.AddCommand(versionCmd)
-	rootCmd.Flags().StringVarP(&config.confType, "conftype", "c", "local", "Use local values to find nodes and execute")
-	rootCmd.Flags().StringVarP(&config.groupPath, "group-path", "p", path.Join(configDir, "groups"), "Set the path to find groups")
-	rootCmd.Flags().StringVar(&config.consulType, "consultype", "service", "Lookup nodes via service or just list nodes")
-	rootCmd.Flags().StringVar(&config.consulFilter, "consulfilter", "", "The filters that will be passed to consuls api")
-	rootCmd.Flags().StringVar(&config.consulService, "consulservice", "", "The service that will be looked if type set to service")
-	rootCmd.Flags().BoolVarP(&config.machines, "machine-list", "m", false, "Use a comma delimited list of nodes to run commands against instead of a group name")
-	rootCmd.Flags().IntVarP(&config.workers, "workers", "f", 1, "The amount of workers to process the commands on a number of nodes")
+	consulCmd.PersistentFlags().StringVarP(&consulFilter, "consul-filter", "f", "", "Pass a filter to consul to limit nodes")
+	rootCmd.PersistentFlags().StringVarP(&groupPath, "group-path", "p", path.Join(configDir, "groups"), "Set the path to find groups")
+	rootCmd.PersistentFlags().IntVarP(&workers, "workers", "w", 1, "The amount of workers to process the commands on a number of nodes")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
