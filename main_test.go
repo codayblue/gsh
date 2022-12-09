@@ -11,7 +11,7 @@ import (
 )
 
 func TestLocalMachineListLoading(t *testing.T) {
-	nodes := parseFileOrList("/tmp", true, "node1,node2,node3")
+	nodes := parseFileOrList("/tmp", true, "node1,node2,pi@node3")
 
 	if len(nodes) < 3 {
 		t.Fatalf("All nodes were not found: %v", nodes)
@@ -25,7 +25,7 @@ func TestLocalMachineListLoading(t *testing.T) {
 func TestLocalMachineGroupLoading(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := path.Join(tempDir, "sampleGroup")
-	err := os.WriteFile(testFile, []byte("   \nnode1\nnode2\nnode3\n#node4\n"), 0644)
+	err := os.WriteFile(testFile, []byte("   \nnode1\nnode2\npi@node3\n#node4\n"), 0644)
 
 	if err != nil {
 		t.Fatal("Failed to create test file")
@@ -39,6 +39,10 @@ func TestLocalMachineGroupLoading(t *testing.T) {
 
 	if nodes[0].address != "node1" {
 		t.Fatalf("First entry was not as expected: %s", nodes[0])
+	}
+
+	if nodes[2].address != "pi@node3" {
+		t.Fatalf("User entry was not as expected: %s", nodes[2])
 	}
 
 	for _, node := range nodes {
