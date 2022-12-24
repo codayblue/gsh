@@ -4,47 +4,59 @@ This project barrows inspiration from DSH aka Dancer Shell. This project aims to
 
 ## How to Use
 
-```bash
-gsh <options> -- <command to run against nodes>
-```
-
 Flags for all implementations:
-`-f 1` will set the number of workers that will be created and will begin working on the set of nodes. Currently 1 worker is the default.
-`--` will cut off the flags and pass the rest to the workers. This is optional but might be needed when passing certain commands that contains flags of its own.
+`-w 1` will set the number of workers that will be created and will begin working on the set of nodes. Currently 1 worker is the default.
+`--` will cut off the flags and pass the rest to the workers. This is optional but might be needed when passing certain commands that contains flags of its own and quotes are not used.
 `-h` will print to the screen all the options that are available.
 
 If you wanna check the version you can do so by running
 
 ```bash
-gsh version
+gsh --version
 ```
 
-### Local Discovery (Currently default)
+### Local Discovery (Default)
 
-This method of finding nodes operates by either passing a comma delimited string of node adresses and users or creating a file like the example below at `~/.gsh/groups/<name of group>`. You pick the group with the `-g` flag. You can change the config path using `-configpath`. 
+```bash
+gsh <group name> [--] <command>
+```
+
+This method of finding nodes operates by creating a file like the example below at `~/.gsh/groups/<name of group>`. You can change the config path to search using `--group-path` or `-p`.
 
 ```text
 node1
 node2
-node3
+pi@node3
 #node4
 ```
 
-For that group it will use the default logged in user for nodes 1-2 and then switch to pi user for node 3. Node 4 is commented out and wont be found. Any blank space will be ignored. 
+For that group it will use the default logged in user for nodes 1-2 and then switch to pi user for node 3. Node 4 is commented out and wont be found. Any blank space will be ignored.
+
+```bash
+gsh machine <comma list of nodes> -- <command>
+```
+
+If you dont want a inventory file of nodes or just have a dynamic list being built you can pass a comma delimited list of node configurations as the api above.
 
 ### Consul Discovery
 
-This method will use consul to find nodes for a given service or just listing all the nodes. Filters can be passed through to the api that will limit the nodes pulled. By default it will connect to `http://127.0.0.1:8500` but that can be changed to a new connection point using consul environment variables or any other way the consul cli client can be configured (except through cli params, those are unsupported). Links below for relevant documentation.
+This method will use consul to find nodes for a given service or just listing all the nodes. Filters can be passed through to the api that will limit the nodes pulled. By default it will connect to `http://127.0.0.1:8500` but that can be changed to a new connection point using consul environment variables or any other way the consul cli client can be configured (except through cli flags, those are not supported at this time). Links below for relevant documentation.
 
-To use consul make sure to have GSH v0.2.x installed. Binaries can be downloaded from github releases page.
+```bash
+CONSUL_HTTP_ADDR=10.10.10.10:8500 gsh consul node [--consul-filter="some filter"] [--] <commands to send to nodes>
+```
 
-Set `-conftype` to consul then the consul flags will be used to find nodes. By default it will look for a service and you must pass `-consulservice` via the cli to set the service you are interested in. To pass filters to consul use `-consulfilter` and filter will be passed directly to consul.
+`gsh consul node` command will pull all the nodes registered to the consul cluster. To limit the nodes or to find specific nodes use the consul filter flag.
 
-If you want to just grab all nodes and filter thoughs the filter flag is the same but set `-consulservice` to `nodes`. That will pull a list of nodes and apply the filters. Leave filter blank if you want to pull all nodes from the api.
+```bash
+CONSUL_HTTP_ADDR=10.10.10.10:8500 gsh consul service <service to lookup> [--consul-filter="some filter"] [--] <commands to send to nodes>
+```
+
+`gsh consul service` will lookup all the nodes in the group passed to gsh. The consul filter flag will limit the nodes based on the filter passed.
 
 Relevant documentation:
-(Consul ENV)[https://www.consul.io/commands#environment-variables]
-(Consul Filtering)[https://www.consul.io/api-docs/features/filtering]
+[Consul ENV](https://www.consul.io/commands#environment-variables)
+[Consul Filtering](https://www.consul.io/api-docs/features/filtering)
 
 ## Plans of what features come next
 

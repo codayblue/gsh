@@ -11,9 +11,7 @@ import (
 )
 
 func TestLocalMachineListLoading(t *testing.T) {
-	flags := Options{confType: "local", machines: "node1,node2,node3"}
-
-	nodes := getNodes(flags)
+	nodes := parseFileOrList("/tmp", true, "node1,node2,pi@node3")
 
 	if len(nodes) < 3 {
 		t.Fatalf("All nodes were not found: %v", nodes)
@@ -27,14 +25,13 @@ func TestLocalMachineListLoading(t *testing.T) {
 func TestLocalMachineGroupLoading(t *testing.T) {
 	tempDir := t.TempDir()
 	testFile := path.Join(tempDir, "sampleGroup")
-	err := os.WriteFile(testFile, []byte("   \nnode1\nnode2\nnode3\n#node4\n"), 0644)
+	err := os.WriteFile(testFile, []byte("   \nnode1\nnode2\npi@node3\n#node4\n"), 0644)
 
 	if err != nil {
 		t.Fatal("Failed to create test file")
 	}
 
-	flags := Options{confType: "local", group: "sampleGroup", groupPath: tempDir}
-	nodes := getNodes(flags)
+	nodes := parseFileOrList(tempDir, false, "sampleGroup")
 
 	if len(nodes) < 3 {
 		t.Fatalf("All nodes were not found: %v", nodes)
@@ -42,6 +39,10 @@ func TestLocalMachineGroupLoading(t *testing.T) {
 
 	if nodes[0].address != "node1" {
 		t.Fatalf("First entry was not as expected: %s", nodes[0])
+	}
+
+	if nodes[2].address != "pi@node3" {
+		t.Fatalf("User entry was not as expected: %s", nodes[2])
 	}
 
 	for _, node := range nodes {
@@ -57,11 +58,13 @@ func TestLocalMachineGroupLoading(t *testing.T) {
 
 func TestConsulServiceLoading(t *testing.T) {
 
-	consulClient, err := api.NewClient(api.DefaultConfig())
+	apiClient, err := api.NewClient(api.DefaultConfig())
 
 	if err != nil {
 		t.Fatal("Could not create consul client")
 	}
+
+	consul := &ConsulConnection{client: apiClient}
 
 	for i := 0; i < 3; i++ {
 		nodeName := "node" + strconv.Itoa(i+1)
@@ -72,7 +75,7 @@ func TestConsulServiceLoading(t *testing.T) {
 			serviceTags = append(serviceTags, "odd")
 		}
 
-		_, err := consulClient.Catalog().Register(
+		_, err := consul.client.Catalog().Register(
 			&api.CatalogRegistration{
 				Node:    nodeName,
 				Address: nodeAddress,
@@ -90,13 +93,7 @@ func TestConsulServiceLoading(t *testing.T) {
 		}
 	}
 
-	serviceflags := Options{
-		confType:      "consul",
-		consulType:    "service",
-		consulFilter:  "odd in ServiceTags",
-		consulService: "redis",
-	}
-	serviceNodes := getNodes(serviceflags)
+	serviceNodes := consul.getConsulServiceNodes("redis", "odd in ServiceTags")
 
 	if len(serviceNodes) == 0 {
 		t.Fatalf("No nodes were found from consul")
@@ -110,13 +107,7 @@ func TestConsulServiceLoading(t *testing.T) {
 		t.Fatalf("First node was not as expected: %v", serviceNodes[0])
 	}
 
-	nodesFlags := Options{
-		confType:      "consul",
-		consulType:    "nodes",
-		consulFilter:  "Node contains node",
-		consulService: "",
-	}
-	consulNodes := getNodes(nodesFlags)
+	consulNodes := consul.getConsulNodes("Node contains node")
 
 	if len(consulNodes) == 0 {
 		t.Fatalf("No nodes were found from consul")
@@ -135,7 +126,7 @@ type TestWorker struct {
 	t *testing.T
 }
 
-func (testWorker *TestWorker) exec(nodes <-chan Node, cmd []string) {
+func (testWorker *TestWorker) exec(nodes <-chan *Node, cmd []string) {
 	for node := range nodes {
 		if !strings.HasPrefix(node.address, "node") {
 			testWorker.t.Fatalf("node is missing node in the front: %s", node)
@@ -150,7 +141,7 @@ func (testWorker *TestWorker) exec(nodes <-chan Node, cmd []string) {
 func TestGopherPool(t *testing.T) {
 	gopherPool := newGopherPool(1, &TestWorker{t: t})
 
-	nodes := []Node{
+	nodes := []*Node{
 		{label: "node1", address: "node1"},
 		{label: "node2", address: "node2"},
 		{label: "node3", address: "node3"},
@@ -162,7 +153,7 @@ func TestGenericWorker(t *testing.T) {
 	echoWorker := &GenericGopher{mainCmd: "echo"}
 	gopherPool := newGopherPool(1, echoWorker)
 
-	nodes := []Node{
+	nodes := []*Node{
 		{label: "node1", address: "node1"},
 		{label: "node2", address: "node2"},
 		{label: "node3", address: "node3"},
