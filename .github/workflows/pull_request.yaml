@@ -12,7 +12,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v3
         with:
-          go-version-file: 'path/to/go.mod'
+          go-version-file: 'go.mod'
       - name: Setup Consul
         run: docker run --rm -d -p 8500:8500 --name consul consul:latest
       - name: Run Tests
